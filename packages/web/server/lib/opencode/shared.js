@@ -519,7 +519,11 @@ function walkSkillMdFiles(rootDir) {
 
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      // Junctions report as links, not directories, and only the scanned root follows
+      // them, so a link loop cannot recurse.
+      const isDirectoryEntry = entry.isDirectory() || (dir === rootDir && entry.isSymbolicLink()
+        && fs.statSync(fullPath, { throwIfNoEntry: false })?.isDirectory() === true);
+      if (isDirectoryEntry) {
         walk(fullPath);
         continue;
       }
