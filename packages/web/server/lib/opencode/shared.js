@@ -520,9 +520,16 @@ function walkSkillMdFiles(rootDir) {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       // Junctions report as links, not directories, and only the scanned root follows
-      // them, so a link loop cannot recurse.
-      const isDirectoryEntry = entry.isDirectory() || (dir === rootDir && entry.isSymbolicLink()
-        && fs.statSync(fullPath, { throwIfNoEntry: false })?.isDirectory() === true);
+      // them, so a link loop cannot recurse. A link whose target cannot be stat'ed is
+      // skipped, the way an unreadable directory is, instead of failing the whole scan.
+      let isDirectoryEntry = entry.isDirectory();
+      if (!isDirectoryEntry && dir === rootDir && entry.isSymbolicLink()) {
+        try {
+          isDirectoryEntry = fs.statSync(fullPath).isDirectory();
+        } catch {
+          isDirectoryEntry = false;
+        }
+      }
       if (isDirectoryEntry) {
         walk(fullPath);
         continue;
