@@ -440,12 +440,34 @@ describe('capturing composer context for the queue', () => {
 
 const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
 
+const LINKED_REFERENCE_KINDS = ['linkedIssue', 'linkedPr', 'linkedLinearIssue', 'linkedGuestIssue'];
+
 /** Lift one predicate out of the composer source: the code under test is the parameter source. */
 const gateExpression = (pattern: RegExp, what: string): string => {
-    const expression = pattern.exec(chatInputSource)?.[1];
-    if (typeof expression !== 'string') throw new Error('ChatInput.tsx no longer holds ' + what);
-    return expression;
+    const match = pattern.exec(chatInputSource);
+    if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
+    return match[1];
 };
+
+/** Every value in the file that is derived from all four kinds of linked reference. */
+const linkedReferenceValues = (): string[] => {
+    const names: string[] = [];
+    for (const match of chatInputSource.matchAll(/const (\w+) = ([^;\n]*);/g)) {
+        const [, name, expression] = match;
+        if (LINKED_REFERENCE_KINDS.every((kind) => expression.includes(kind))) names.push(name);
+    }
+    return names;
+};
+
+/**
+ * True when a predicate counts a linked reference: it names one of the four kinds
+ * directly, or it reads a value derived from all four. The assertion follows that
+ * intent rather than one variable name, so inlining the value back into the
+ * predicates stays green while a predicate that stops counting stays red.
+ */
+const countsLinkedReference = (predicate: string): boolean =>
+    LINKED_REFERENCE_KINDS.some((kind) => predicate.includes(kind))
+    || linkedReferenceValues().some((name) => predicate.includes(name));
 
 describe('the composer send gate counts what the submission builder counts', () => {
     // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
@@ -459,24 +481,19 @@ describe('the composer send gate counts what the submission builder counts', () 
         ];
 
         for (const gate of gates) {
-            expect(gate).toContain('hasLinkedReferences');
-        }
-
-        const linkedValue = gateExpression(/const hasLinkedReferences = ([^;\n]*);/, 'the linked-reference value');
-        for (const kind of ['linkedIssue', 'linkedPr', 'linkedLinearIssue', 'linkedGuestIssue']) {
-            expect(linkedValue).toContain(kind);
+            expect(countsLinkedReference(gate)).toBe(true);
         }
     });
 
     test('the submit guard recomputes when a linked reference changes', () => {
-        expect(gateExpression(
+        expect(countsLinkedReference(gateExpression(
             /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{([\s\S]*?)\n {4}\}, \[/,
             'the submit guard body',
-        )).toContain('hasLinkedReferences');
-        expect(gateExpression(
+        ))).toBe(true);
+        expect(countsLinkedReference(gateExpression(
             /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{[\s\S]*?\n {4}\}, ([^)]*)\);/,
             'the submit guard dependencies',
-        )).toContain('hasLinkedReferences');
+        ))).toBe(true);
     });
 
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {
